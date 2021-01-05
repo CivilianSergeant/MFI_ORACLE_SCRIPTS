@@ -231,8 +231,9 @@ BEGIN
 		
 		-- Step 16: Expire List
  		DAILY_START_PROCESS.DELETE_EXPIRE_LOAN_ACCOUNTS(officeID);
+ 	
 		-- Step 17: Family Grace
-		
+		DAILY_START_PROCESS.DELETE_EXPIRED_FAMILY_GRACE_ACCOUNTS(officeID,startBusinessDate);
 	
 		 -- Step 18: MAKE LOAN ACCOUNT PENDING WHILE DISBURSE DATE IS EQUAL TO startBusinessDate
 		 UPDATE LOAN_SUMMARY SET DISBURSE_DATE = NULL,
@@ -240,15 +241,27 @@ BEGIN
 		 WHERE OFFICE_ID=officeID And DISBURSE_DATE=startBusinessDate AND ORGANIZATION_ID=orgID;
 	
 		-- Step 19: Delete Voucher
+		ACCOUNTS.UPDATE_AUTO_VOUCHER(officeID);
 		
 		-- Step 20: Update Daily Loan Trx For Lift Loan
-		
+		DAILY_START_PROCESS.UPDATE_LOAN_FOR_LIFT_LOAN(officeID, startBusinessDate);
+	
 		-- Step 21: Update Daily Loan Trx For Duration Over Charge
+		IF(orgID = 5) THEN
+			DAILY_START_PROCESS.UPDATE_LOAN_FOR_JCF(officeID, orgID, startBusinessDate);
+		END IF;
 		
+		DAILY_START_PROCESS.UPDATE_LOAN_FOR_LAST_INSTALLMENT(officeID, orgID, startBusinessDate);
+	
 		-- Step 22: Insert LTS Saving Transactions 
 		WRITE_LOG('START LTS SAVING TRX FROM OFFICE: ' || officeID);
 		DAILY_START_PROCESS.ADD_LTS_SAVING_TRX(createDate,createUser,weekDay,officeID,orgID);
---	
+
+		-- Step 23: UPDATE LOAN SUMMARY TO RESET PARTIAL AMOUNT AND DELETE TEMP DATA
+		DAILY_START_PROCESS.RESET_PARTIAL_AMOUNT(officeID, orgID);
+	
+		DAILY_START_PROCESS.DELETE_TEMP_DATA(officeID,startBusinessDate);
+	
 		-- Insert Process Info record for given date if not exist
 		SELECT COUNT(PROCESS_INFO_ID) INTO lastProcessInfoID FROM PROCESS_INFO 
 			WHERE OFFICE_ID=officeID AND BUSINESS_DATE = startBusinessDate;
