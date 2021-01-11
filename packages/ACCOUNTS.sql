@@ -2,7 +2,14 @@ CREATE OR REPLACE PACKAGE MFIDSK.ACCOUNTS
 AS
    PROCEDURE UPDATE_AUTO_VOUCHER(officeID NUMBER);
    PROCEDURE ACCOUNT_DAY_CLOSE(officeID NUMBER, orgID NUMBER, businessDate DATE);
-  
+   PROCEDURE ACCOUNT_CLOSE(
+   			office_id NUMBER,
+			member_id NUMBER,
+			center_id NUMBER,
+			no_of_account NUMBER,
+			saving_summary_id NUMBER,
+			transaction_date DATE);
+   PROCEDURE AUTO_ACCOUNT_CLOSE(officeID NUMBER,orgID NUMBER, businessDate DATE);
 END ACCOUNTS;
 
 CREATE OR REPLACE PACKAGE BODY MFIDSK.ACCOUNTS
@@ -126,5 +133,68 @@ EXCEPTION
 	WRITE_LOG(spName || SQLERRM);
 	raise_application_error(-20001,spName || SQLERRM);
 	
+END;
+
+PROCEDURE ACCOUNT_CLOSE(
+   			office_id NUMBER,
+			member_id NUMBER,
+			center_id NUMBER,
+			no_of_account NUMBER,
+			saving_summary_id NUMBER,
+			transaction_date DATE) 
+IS
+BEGIN
+END;
+
+PROCEDURE AUTO_ACCOUNT_CLOSE(officeID NUMBER,orgID NUMBER, businessDate DATE)
+IS
+	CURSOR cur IS
+		SELECT s.OFFICE_ID,s.CENTER_ID,s.MEMBER_ID,s.PRODUCT_ID,s.NO_OF_ACCOUNT,
+		s.SAVING_SUMMARY_ID,d.TRANSACTION_DATE
+		FROM SAVING_SUMMARY s 
+		INNER JOIN (SELECT dst.TRANSACTION_DATE,dst.SAVING_SUMMARY_ID,
+			SUM(dst.SAVING_INSTALLMENT) SAVING_INSTALLMENT,
+			SUM(dst.WITHDRAWAL) WITHDRAWAL,
+			SUM(dst.MONTHLY_INTEREST) MONTHLY_INTEREST
+			FROM DAILY_SAVING_TRX dst
+			WHERE dst.OFFICE_ID=officeID AND dst.ORGANIZATION_ID=orgID
+			GROUP BY SAVING_SUMMARY_ID,TRANSACTION_DATE 
+			HAVING SUM(dst.WITHDRAWAL)>0) d ON s.SAVING_SUMMARY_ID=d.SAVING_SUMMARY_ID
+		Where (s.DEPOSIT+s.CUM_INTEREST-s.WITHDRAWAL+s.PENALTY)=0 
+		AND s.OFFICE_ID=officeID AND s.ORGANIZATION_ID=orgID
+		--Where (s.Deposit+s.CumInterest-s.Withdrawal+d.SavingInstallment+d.MonthlyInterest-d.Withdrawal)<=0 and s.OfficeID=@lcl_OfficeID
+		--And d.TransactionDate=CONVERT(DATETIME, @lcl_BusinessDate, 102)
+		AND s.SAVING_STATUS=1;
+	
+		TYPE class IS RECORD (
+			office_id NUMBER(22),
+			member_id NUMBER(32),
+			center_id NUMBER(19),
+			no_of_account NUMBER(10),
+			saving_summary_id NUMBER(32),
+			transaction_date DATE
+		);
+	
+		TYPE records IS TABLE OF class INDEX BY BINARY_INTEGER;
+		v_records records;
+BEGIN
+	OPEN cur;
+	
+	FETCH cur BULK COLLECT INTO v_records;
+	IF(v_records.COUNT>0) THEN
+		FOR i IN 1..v_records.COUNT LOOP
+			ACCOUNTS.ACCOUNT_CLOSE(
+				v_records(i).office_id,
+				v_records(i).member_id,
+				v_records(i).center_id,
+				v_records(i).no_of_account,
+				v_records(i).saving_summary_id,
+				v_records(i).transaction_date
+			);
+		END LOOP;
+	END IF;
+
+	CLOSE cur;
+
 END;
 END ACCOUNTS;
