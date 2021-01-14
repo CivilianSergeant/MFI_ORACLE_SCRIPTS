@@ -136,15 +136,111 @@ EXCEPTION
 END;
 
 PROCEDURE ACCOUNT_CLOSE(
-   			office_id NUMBER,
-			member_id NUMBER,
-			center_id NUMBER,
-			no_of_account NUMBER,
-			saving_summary_id NUMBER,
-			transaction_date DATE) 
+   			officeID NUMBER,
+			memberID NUMBER,
+			centerID NUMBER,
+			noOfAccount NUMBER,
+			savingSummaryID NUMBER,
+			transactionDate DATE) 
 IS
+trxDate DATE;
+hasLoan NUMBER(1);
+hasLoanSummary NUMBER(1);
+vMainProductCode VARCHAR(50):='';
 BEGIN
-	WRITE_LOG('AUto close sp need to write');
+	SELECT MAX(BUSINESS_DATE) INTO trxDate FROM PROCESS_INFO WHERE OFFICE_ID=officeID;
+
+	SELECT COUNT(*) INTO hasLoan FROM DAILY_LOAN_TRX WHERE OFFICE_ID=officeID 
+			AND CENTER_ID=centerID 
+			AND MEMBER_ID=memberID
+			AND PRODUCT_ID=productID AND NO_OF_ACCOUNT=noOfAccount;
+
+	IF (hasLoan = 0) THEN
+
+		SELECT MAIN_PRODUCT_CODE INTO vMainProductCode FROM PRODUCTS WHERE PRODUCT_ID=productID;
+
+		SELECT COUNT(*) INTO hasLoanSummary FROM (SELECT l.OFFICE_ID,l.CENTER_ID,l.MEMBER_ID,
+		SUM(NVL(l.PRINCIPAL_LOAN,0)+NVL(l.INT_CHARGE,0))-SUM(
+			NVL(l.LOAN_REPAID,0) +
+			NVL(l.INT_PAID,0) + 
+			NVL(d.LOAN_PAID,0) + 
+			NVL(d.INT_PAID,0)
+		) 
+		FROM LOAN_SUMMARY l 
+		LEFT JOIN DAILY_LOAN_TRX d ON l.OFFICE_ID=d.OFFICE_ID 
+		and l.CENTER_ID=d.CENTER_ID 
+		and l.MEMBER_ID=d.MEMBER_ID 
+		and l.PRODUCT_ID=d.PRODUCT_ID 
+		and l.LOAN_TERM=d.LOAN_TERM
+		WHERE l.IS_ACTIVE=1 AND l.OFFICE_ID=officeID AND l.CENTER_ID=centerID 
+		AND l.MEMBER_ID=memberID AND l.ORGANIZATION_ID=orgID
+		GROUP BY l.OFFICE_ID,l.CENTER_ID,l.MEMBER_ID) r;
+
+		IF (hasLoanSummary = 0) THEN
+
+				SELECT COUNT(*) INTO hasLoanSummary FROM (
+					SELECT  ((NVL(s.DEPOSIT,0)+NVL(d.SAVING_INSTALLMENT,0)+
+					NVL(s.CUM_INTEREST,0))-(NVL(s.WITHDRAWAL,0)+NVL(d.WITHDRAWAL,0))) 
+					FROM SAVING_SUMMARY s
+					LEFT JOIN (
+							SELECT dst.OFFICE_ID,dst.CENTER_ID,dst.MEMBER_ID,dst.NO_OF_ACCOUNT,dst.PRODUCT_ID, 
+							sum(dst.SAVING_INSTALLMENT) SAVING_INSTALLMENT,sum(dst.WITHDRAWAL) WITHDRAWAL 
+							FROM DAILY_SAVING_TRX dst 
+							WHERE dst.OFFICE_ID=officeID 
+							And dst.CENTER_ID=centerID 
+							And dst.MEMBER_ID=memberID 
+							And dst.PRODUCT_ID=productID 
+							And dst.ORGANIZATION_ID=orgID 
+							And dst.NO_OF_ACCOUNT=noOfAccount 
+							GROUP BY dst.OFFICE_ID,dst.CENTER_ID,dst.MEMBER_ID,dst.NO_OF_ACCOUNT,dst.PRODUCT_ID
+					) d on s.OFFICE_ID=d.OFFICE_ID 
+				and s.CENTER_ID=d.CENTER_ID 
+				and s.MEMBER_ID=d.MEMBER_ID 
+				and s.PRODUCT_ID=d.PRODUCT_ID 
+				and s.NO_OF_ACCOUNT=d.NO_OF_ACCOUNT
+				Where s.OFFICE_ID=officeID 
+					AND s.CENTER_ID=centerID 
+					AND s.MEMBER_ID=memberID 
+					AND s.PRODUCT_ID=productID 
+					AND s.ORGANIZATION_ID=orgID 
+					AND s.NO_OF_ACCOUNT=noOfAccount
+					And s.IS_ACTIVE=1
+					And ((NVL(s.DEPOSIT,0)+NVL(d.SAVING_INSTALLMENT,0)+
+						NVL(s.CUM_INTEREST,0))-(NVL(s.WITHDRAWAL,0)+NVL(d.WITHDRAWAL,0))) <=0
+				) ds;
+
+			IF(hasLoanSummary >0) THEN
+				IF(SUBSTR(vMainProductCode,0,2) = '21')
+
+					SELECT COUNT(*) INTO hasSavingSummary FROM  SAVING_SUMMARY s 
+					INNER JOIN PRODUCTS p on s.PRODUCT_ID=p.PRODUCT_ID 
+					WHERE SUBSTR(p.MAIN_PRODUCT_CODE,0,2)<>'21' and s.SAVING_STATUS=1
+							AND s.OFFICE_ID=officeID AND s.CENTER_ID=centerID AND s.MEMBER_ID=memberID AND s.IS_ACTIVE=1;
+
+							IF(hasSavingSummary = 0) THEN
+								UPDATE SAVING_SUMMARY SET SAVING_STATUS=0,CLOSING_DATE=trxDate, 
+								TRANSACTION_DATE=trxDate 
+								Where ORGANIZATION_ID=orgID AND  OFFICE_ID=officeID 
+								AND CENTER_ID=centerID AND MEMBER_ID=memberID 
+								AND PRODUCT_ID=productID AND NO_OF_ACCOUNT=noOfAccount;
+							END IF;
+
+				ELSE
+					UPDATE SAVING_SUMMARY SET SAVING_STATUS=0,CLOSING_DATE=trxDate, 
+					TRANSACTION_DATE=trxDate 
+					Where ORGANIZATION_ID=orgID AND  OFFICE_ID=officeID 
+					AND CENTER_ID=centerID AND MEMBER_ID=memberID 
+					AND PRODUCT_ID=productID AND NO_OF_ACCOUNT=noOfAccount;
+
+				END IF;
+			END IF;
+		ELSE
+
+		END IF;
+
+	END IF;
+
+
 END;
 
 PROCEDURE AUTO_ACCOUNT_CLOSE(officeID NUMBER,orgID NUMBER, businessDate DATE)
