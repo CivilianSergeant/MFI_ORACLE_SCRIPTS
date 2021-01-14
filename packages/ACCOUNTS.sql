@@ -17,6 +17,7 @@ AS
 /**
  * Update Auto Voucher
  * Author Himel
+ * CALLED in DAY_INITIAL
  */
 PROCEDURE UPDATE_AUTO_VOUCHER(officeID IN NUMBER) 
 IS
@@ -77,7 +78,6 @@ BEGIN
 	UPDATE ACC_LAST_VOUCHER
 		SET		
 		VOUCHER_NO=(SUBSTR(accVoucherNO,1,INSTR(accVoucherNO,'-')-1)|| '-' || vYear) 
-		FROM ACC_LAST_VOUCHER 
 		WHERE OFFICE_ID=officeID;
 
 	INSERT INTO TMP_LEDGER(TRANSACTION_DATE, VOUCHER_NO, NARATION, 
@@ -144,12 +144,14 @@ PROCEDURE ACCOUNT_CLOSE(
 			transaction_date DATE) 
 IS
 BEGIN
+	WRITE_LOG('AUto close sp need to write');
 END;
 
 PROCEDURE AUTO_ACCOUNT_CLOSE(officeID NUMBER,orgID NUMBER, businessDate DATE)
 IS
-	CURSOR cur IS
-		SELECT s.OFFICE_ID,s.CENTER_ID,s.MEMBER_ID,s.PRODUCT_ID,s.NO_OF_ACCOUNT,
+CURSOR cur IS
+		SELECT s.OFFICE_ID,s.CENTER_ID,s.MEMBER_ID,s.NO_OF_ACCOUNT,
+--		,,s.PRODUCT_ID,,
 		s.SAVING_SUMMARY_ID,d.TRANSACTION_DATE
 		FROM SAVING_SUMMARY s 
 		INNER JOIN (SELECT dst.TRANSACTION_DATE,dst.SAVING_SUMMARY_ID,
@@ -162,25 +164,24 @@ IS
 			HAVING SUM(dst.WITHDRAWAL)>0) d ON s.SAVING_SUMMARY_ID=d.SAVING_SUMMARY_ID
 		Where (s.DEPOSIT+s.CUM_INTEREST-s.WITHDRAWAL+s.PENALTY)=0 
 		AND s.OFFICE_ID=officeID AND s.ORGANIZATION_ID=orgID
-		--Where (s.Deposit+s.CumInterest-s.Withdrawal+d.SavingInstallment+d.MonthlyInterest-d.Withdrawal)<=0 and s.OfficeID=@lcl_OfficeID
-		--And d.TransactionDate=CONVERT(DATETIME, @lcl_BusinessDate, 102)
 		AND s.SAVING_STATUS=1;
 	
-		TYPE class IS RECORD (
+		TYPE Account IS RECORD (
 			office_id NUMBER(22),
-			member_id NUMBER(32),
 			center_id NUMBER(19),
+			member_id NUMBER(32),
 			no_of_account NUMBER(10),
 			saving_summary_id NUMBER(32),
 			transaction_date DATE
 		);
-	
-		TYPE records IS TABLE OF class INDEX BY BINARY_INTEGER;
+		TYPE records IS TABLE OF Account INDEX BY BINARY_INTEGER;
 		v_records records;
 BEGIN
+	
 	OPEN cur;
 	
 	FETCH cur BULK COLLECT INTO v_records;
+
 	IF(v_records.COUNT>0) THEN
 		FOR i IN 1..v_records.COUNT LOOP
 			ACCOUNTS.ACCOUNT_CLOSE(
